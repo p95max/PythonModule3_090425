@@ -13,16 +13,17 @@ def init_db(cursor):
         russian_translation TEXT NOT NULL
     );
     """
-    # sql_answers = """
-    # CREATE TABLE IF NOT EXISTS answers (
-    #     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    #     word_id INTEGER NOT NULL,
-    #     timestamp TEXT NOT NULL,
-    #     is_correct INTEGER NOT NULL,
-    #     FOREIGN KEY (word_id) REFERENCES words(id)
-    # );
-    # """
+    sql_answers = """
+    CREATE TABLE IF NOT EXISTS answers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        word_id INTEGER NOT NULL,
+        timestamp TEXT NOT NULL,
+        is_correct INTEGER NOT NULL,
+        FOREIGN KEY (word_id) REFERENCES words(id)
+    );
+    """
     cursor.execute(sql)
+    cursor.execute(sql_answers)
 
 
 def add_word(cursor, english_word: str, russian_translation: str) -> None:
@@ -31,12 +32,14 @@ def add_word(cursor, english_word: str, russian_translation: str) -> None:
     INSERT INTO words (english_word, russian_translation)
     VALUES (?, ?)
     """
+    if not english_word or russian_translation:
+        ValueError("Not empty")
     cursor.execute(sql, (english_word, russian_translation))
 
 
 def get_all_words(cursor) -> list[tuple]:
     sql = """
-        SELECT english_word, russian_translation FROM words
+        SELECT id, english_word, russian_translation FROM words
         """
     cursor.execute(sql)
     words_data = cursor.fetchall()
@@ -76,3 +79,39 @@ def get_table_info(cursor: sqlite3.Cursor, table_name: str):
     """Вспомогательная функция для получения информации о таблице (для тестов)."""
     cursor.execute(f"PRAGMA table_info({table_name})")
     return cursor.fetchall()
+
+def record_answer(cursor: sqlite3.Cursor, word_id: int, timestamp:str, is_correct: int):
+    sql = """
+    INSERT INTO answers (word_id, timestamp, is_correct)
+        VALUES (?, ?, ?)
+    """
+
+    cursor.execute(sql, (word_id, timestamp, is_correct))
+
+
+def view_words_stats(cursor: sqlite3.Cursor):
+    sql =  """
+    SELECT
+        words.english_word,
+        COUNT(answers.id) AS total_questions,
+        COALESCE(SUM(CASE WHEN answers.is_correct = 1 THEN 1 ELSE 0 END), 0) AS correct_answers,
+        COALESCE(SUM(CASE WHEN answers.is_correct = 0 THEN 1 ELSE 0 END), 0) AS incorrect_answers
+    FROM words
+    LEFT JOIN answers ON words.id = answers.word_id
+    GROUP BY words.id;
+    """
+
+    keys = ["english_word", "total_questions", "correct_answers", "incorrect_answers"]
+    cursor.execute(sql)
+    words_data = cursor.fetchall()
+
+    if not words_data:
+        print("Нет слов в словаре.")
+        return
+
+    for word_data in words_data:
+        word = dict(zip(keys, word_data))
+        print(
+            f"{word['english_word']}: всего — {word['total_questions']}, "
+            f"верно — {word['correct_answers']}, неверно — {word['incorrect_answers']}"
+        )

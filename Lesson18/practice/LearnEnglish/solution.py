@@ -3,6 +3,7 @@ import random
 import database
 from helpers.connection import Connect
 from pathlib import Path
+from datetime import datetime
 
 DATABASE_NAME = Path('vocabulary.db')
 
@@ -13,19 +14,23 @@ def start_test(cursor):
     all_words = database.get_all_words(cursor)
 
     random.shuffle(all_words)
-    for english_word, correct_translation in all_words:
+    for word_id, english_word, correct_translation in all_words:
+
         user_input = input(f"Как переводится '{english_word}'? (или 'стоп'/'exit' для выхода): ").strip().lower()
 
         if user_input in ('стоп', 'exit'):
             print("Тест завершен.")
             break
-
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         if user_input == correct_translation:
             print("Верно!")
+            database.record_answer(cursor, word_id, timestamp, 1)
         else:
             print(f"Неправильно. Правильный перевод: '{correct_translation}'.")
+            database.record_answer(cursor, word_id, timestamp, 0)
 
         print("-" * 20)  # Разделитель для следующего вопроса
+
 
 
 def main_menu(cursor: sqlite3.Cursor):
@@ -37,7 +42,8 @@ def main_menu(cursor: sqlite3.Cursor):
         print("2. Посмотреть слова")
         print("3. Удалить слово")
         print("4. Начать тест")
-        print("5. Выход")
+        print("5. Посмотреть статистику")
+        print("6. Выход")
         print("-------------------------------------------------")
 
         choice = input("Выберите действие: ").strip()
@@ -54,6 +60,8 @@ def main_menu(cursor: sqlite3.Cursor):
         elif choice == '4':
             start_test(cursor)
         elif choice == '5':
+            database.view_words_stats(cursor)
+        elif choice == '6':
             print("До свидания!")
             break
         else:

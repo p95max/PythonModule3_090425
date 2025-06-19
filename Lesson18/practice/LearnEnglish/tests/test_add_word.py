@@ -1,93 +1,95 @@
 import pytest
 import sqlite3
-from pathlib import Path
+from database import init_db, add_word
 
-# Импортируем только нужные функции из вашего файла с кодом
-from database import init_db, add_word, Connect
 
 @pytest.fixture
-def in_memory_cursor():
+def in_memory_db():
     """
     Фикстура Pytest, которая создает и инициализирует
     соединение с базой данных SQLite в памяти,
-    и возвращает курсор для этого соединения.
+    и возвращает соединение и курсор.
     Гарантирует, что таблица 'words' существует и соединение
     корректно закрывается после теста.
     """
-    db_path = Path(":memory:")  # Специальное имя для in-memory БД
-    conn = None
+    conn = sqlite3.connect(":memory:")
+    cursor = conn.cursor()
+    init_db(cursor)
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Инициализируем таблицу 'words'
-        init_db(cursor)  # Используем init_db для создания таблицы
-
-        yield cursor  # Возвращаем курсор для использования в тестах
-
+        yield conn, cursor
     finally:
-        # Этот блок выполняется после завершения каждого теста
         if conn:
-            conn.commit()  # Сохраняем все изменения, сделанные в тесте
-            conn.close()  # Закрываем соединение, уничтожая in-memory БД
+            conn.close()
 
 
-def test_add_word_success(in_memory_cursor):
+def test_init_db_creates_table(in_memory_db):
+    """
+    Тест: Проверка, что init_db создает таблицу 'words'.
+    """
+    _, cursor = in_memory_db
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='words';")
+    assert cursor.fetchone() is not None, "Таблица 'words' не создана"
+
+
+def test_add_word_success(in_memory_db):
     """
     Тест: Успешное добавление нового слова в БД.
     """
-    # Получаем начальное количество слов напрямую через курсор
-    in_memory_cursor.execute("SELECT COUNT(*) FROM words")
-    initial_count = in_memory_cursor.fetchone()[0]
+    conn, cursor = in_memory_db
+    cursor.execute("SELECT COUNT(*) FROM words")
+    initial_count = cursor.fetchone()[0]
 
     english = "apple"
     russian = "яблоко"
-    add_word(in_memory_cursor, english, russian)
+    add_word(cursor, english, russian)
+    conn.commit()
 
-    # Проверяем, что слово добавлено и его перевод корректен напрямую через курсор
-    in_memory_cursor.execute("SELECT russian_translation FROM words WHERE english_word = ?", (english,))
-    retrieved_translation = in_memory_cursor.fetchone()
-    assert retrieved_translation is not None and retrieved_translation[0] == russian
+    cursor.execute("SELECT russian_translation FROM words WHERE english_word = ?", (english,))
+    retrieved_translation = cursor.fetchone()
+    assert retrieved_translation is not None and retrieved_translation[0] == russian, \
+        f"Перевод для '{english}' не соответствует ожидаемому '{russian}'"
 
-    # Проверяем, что количество слов увеличилось на 1 напрямую через курсор
-    in_memory_cursor.execute("SELECT COUNT(*) FROM words")
-    assert in_memory_cursor.fetchone()[0] == initial_count + 1
+    cursor.execute("SELECT COUNT(*) FROM words")
+    assert cursor.fetchone()[0] == initial_count + 1, "Количество слов не увеличилось"
 
 
-def test_add_word_duplicate_entry_raises_error(in_memory_cursor):
+def test_add_word_duplicate_entry_raises_error(in_memory_db):
     """
     Тест: Попытка добавить дубликат слова должна вызвать ValueError.
+    Предполагается, что add_word явно проверяет дубликаты и выбрасывает ValueError.
     """
+    conn, cursor = in_memory_db
     english = "banana"
     russian = "банан"
-    add_word(in_memory_cursor, english, russian)  # Добавляем слово один раз
+    add_word(cursor, english, russian)
+    conn.commit()
 
-    # Попытка добавить то же слово еще раз (другой перевод не важен)
-    with pytest.raises(sqlite3.IntegrityError):
-        add_word(in_memory_cursor, english, "фрукт")
+    with pytest.raises(ValueError):
+        add_word(cursor, english, "фрукт")
 
-    in_memory_cursor.execute("SELECT COUNT(*) FROM words")
-    assert in_memory_cursor.fetchone()[0] == 1  # Предполагая, что это было первое и единственное слово
+    cursor.execute("SELECT COUNT(*) FROM words")
+    assert cursor.fetchone()[0] == 1, "Добавилась лишняя запись"
 
 
-def test_add_word_empty_english_word_raises_error(in_memory_cursor):
+def test_add_word_empty_english_word_raises_error(in_memory_db):
     """
     Тест: Добавление слова с пустым английским словом должно вызвать ValueError.
     """
+    conn, cursor = in_memory_db
     with pytest.raises(ValueError):
-        add_word(in_memory_cursor, "", "пустой")
-    # Проверяем, что слово не было добавлено
-    in_memory_cursor.execute("SELECT COUNT(*) FROM words")
-    assert in_memory_cursor.fetchone()[0] == 0
+        add_word(cursor, "", "пустой")
+
+    cursor.execute("SELECT * FROM words")
+    assert cursor.fetchall() == [], "Таблица не осталась пустой"
 
 
-def test_add_word_empty_russian_translation_raises_error(in_memory_cursor):
+def test_add_word_empty_russian_translation_raises_error(in_memory_db):
     """
     Тест: Добавление слова с пустым русским переводом должно вызвать ValueError.
     """
+    conn, cursor = in_memory_db
     with pytest.raises(ValueError):
-        add_word(in_memory_cursor, "empty", "")
-    # Проверяем, что слово не было добавлено
-    in_memory_cursor.execute("SELECT COUNT(*) FROM words")
-    assert in_memory_cursor.fetchone()[0] == 0
+        add_word(cursor, "empty", "")
 
+    cursor.execute("SELECT * FROM words")
+    assert cursor.fetchall() == [], "Таблица не осталась пустой"
